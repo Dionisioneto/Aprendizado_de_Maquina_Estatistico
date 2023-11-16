@@ -10,11 +10,11 @@
 if(!require(pacman)) install.packages("pacman"); library(pacman)
 p_load(ggplot2,dplyr, tidyverse,
        caret,   # for general data preparation and model fitting
-       xgboost) # for fitting the xgboost model
+       e1071) # for fitting the xgboost model
 
 ## Leitura do banco de dados
 
-setwd("C:/Users/dioni/OneDrive - University of São Paulo/Doutorado em Estatística/2023.2/2 - Aprendizado de Máquina Estatístico/3_Trabalho_Final")
+setwd("C:/Users/dioni/OneDrive - University of São Paulo/Doutorado em Estatística/2023.2/2 - Aprendizado de Máquina Estatístico/Codigos_Pratica/3_Trabalho_Final/dados")
 
 bf = read.csv("bolsafamilia_tx.csv")
 head(bf)
@@ -63,92 +63,21 @@ dim(treinobf);dim(testebf)
 ## Machine Learning Regression Models
 ## -------
 
-## ---
-## XGBoost
-## ---
+## ----
+## Máquinas de Vetores de Suporte (SVM)
+## ----
 
-# specifying the CV technique which will be passed into the train() function later and number parameter is the "k" in K-fold cross validation
-
-## Especificando a tecnica de validação cruzada que será passada no treino
-## futuramente e o paramtro k para o k-fold CV.
-
-train_control = trainControl(method = "cv", number = 10,
-                             search = "grid")
-
-set.seed(50)
-
-# Customização do grid
-
-gbmGrid =  expand.grid(max_depth = c(3, 5, 7), 
-                        nrounds = (1:10)*50,    # number of trees
-                        # default values below
-                        eta = 0.3,
-                        gamma = 0,
-                        subsample = 1,
-                        min_child_weight = 1,
-                        colsample_bytree = 0.6)
-
-# training a XGboost Regression tree model while tuning parameters
-model = train(tx_benbf~., data = treinobf, method = "xgbTree",
-              trControl = train_control, tuneGrid = gbmGrid)
-
-# summarising the results
-print(model)
-
-## ---
-## Usar a melhor configuração xgboost nos dados de teste
-## ---
-
-#use model to make predictions on test data
-predxgb = predict(model, testebf)
-
-# performance metrics on the test data
-test_y = testebf['tx_benbf']
-
-mse = sum((test_y - predxgb)^2)/length(predxgb) #mse - Mean Squared Error
-mse
-
-sqrt(mse) #rmse - Root Mean Squared Error
-
-
-## ---
-## Support Vector Machines (SVM)
-## ---
-
-# Setup for cross validation
-ctrl <- trainControl(method="cv",   # 10 fold cross validation
-                     number = 10,
-                     search = "grid")
-
-tuneGridsvm = expand.grid(
-  C = c(0.25, .5, 1),
-  sigma = 0.1
-)
-
-svm.tune = train(tx_benbf~., data = treinobf,
-                  method = "svmRadial",   # Linear kernel, tentar svmRadial
-                  tuneLength = 5,         # 5 values of the cost function
-                  metric="RMSE",
-                 trControl=ctrl,
-                 tuneGrid = tuneGridsvm)
-
-svm.tune
-
-plot(svm.tune)
-
-
-## Uma outra abortagem para o tunning do svm
-#install.packages("e1071")
-library(e1071)
 
 ## Tuning SVR model by varying values of maximum allowable error and cost parameter
 
 #Tune the SVM model
 OptModelsvm=tune(svm, tx_benbf~.,
                  data = treinobf,
-                 ranges=list(elsilon=seq(0,1,0.1),
+                 ranges=list(epsilon=seq(0,1,0.1),
                              cost=1:10, kernel=c("linear", "polynomial",
-                                                  "radial", "sigmoid")))
+                                                  "radial", "sigmoid"),
+                             gamma=log(seq(1,10,0.9))),
+                 tunecontrol = tune.control(cross = 10))
 
 #Print optimum value of parameters
 print(OptModelsvm)
@@ -160,7 +89,21 @@ plot(OptModelsvm)
 ## Random Forest Regressor (RFR)
 ## ---
 
+#Tune the Random Forest model
+install.packages("randomForest")
 
+OptModelRF=tune(randomForest, tx_benbf~.,
+                 data = treinobf,
+                 ranges=list(ntree = seq(100,1000,100),
+                             mtry = seq(5,25,5),
+                             maxnodes = seq(5,25,5)),
+                 tunecontrol = tune.control(cross = 10))
+
+#Print optimum value of parameters
+print(OptModelRF)
+
+#Plot the perfrormance of SVM Regression model
+plot(OptModelRF)
 
 
 
