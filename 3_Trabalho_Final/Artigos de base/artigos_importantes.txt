@@ -1,0 +1,12 @@
+[Artigos importantes para o trabalho]
+
+- The betaboost package—a software tool for
+modelling bounded outcome variables in
+potentially high-dimensional epidemiological
+data
+
+- Estimation of High School Entrance Examination Success 
+Rates Using Machine Learning and Beta Regression Models
+
+- Scheduling Simulator by Ensemble Forecasting of Construction Duration
+

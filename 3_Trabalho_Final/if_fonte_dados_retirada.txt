@@ -1,0 +1,26 @@
+dados sociodemograficos (covariaveis explicativas):
+
+http://www.atlasbrasil.org.br/acervo/biblioteca  
+acesso em dados censo 2010
+
+Listas
+
+CODMUN7
+CODMUN6
+FECTOT
+SOBRE40
+E_ANOSESTUDO
+T_ANALF18M
+T_FBBAS
+T_FBFUND
+T_FBMED
+T_FBSUPER
+T_MED18M
+T_SUPER25M
+GINI
+PIND
+
+
+dados do cadastro (variável resposta):
+
+https://dados.gov.br/dados/conjuntos-dados/bolsa-familia---beneficios-basicos-e-variaveis----mi-social

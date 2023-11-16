@@ -1,0 +1,40 @@
+## [Bagging]
+
+def bootstrap_sample(original_dataset, m):
+    sub_dataset = []
+    for i in range(m):
+        sub_dataset.append(
+            random_one_element(original_dataset)
+        )
+    return sub_dataset
+
+
+def bagging(n, m, base_algorithm, train_dataset, target, test_dataset):
+    predictions = matrix(row_length=len(target), column_length=n)
+    for i in range(n):
+        sub_dataset = bootstrap_sample(train_dataset, m)
+        predictions[,i] = base_algorithm.fit(original_dataset, target).predict(test_dataset)
+
+    final_predictions = voting(predictions) # for classification
+    final_predictions = averaging(predictions) # for regression
+
+    return final_predictions
+
+
+## [Boosting]
+
+def adjust_dataset(_train, errors):
+    #create a new dataset by using the hardest instances
+    ix = get_highest_errors_index(train)
+    return concat(_train[ix], random_select(train))
+
+models = []
+_train = random_select(train)
+for i in range(n): #n rounds
+    model = base_algorithm.fit(_train)
+    predictions = model.predict(_train)
+    models.append(model)
+    errors = calculate_error(predictions)
+    _train = adjust_dataset(_train, errors)
+
+final_predictions = combine(models, test)
