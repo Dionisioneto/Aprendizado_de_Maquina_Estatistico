@@ -8,18 +8,18 @@
 ## Bibliotecas
 
 if(!require(pacman)) install.packages("pacman"); library(pacman)
-p_load(ggplot2,dplyr, betareg, betaboost)
+p_load(ggplot2,dplyr, betareg, betaboost,e1071,caret,compiler)
+
 
 ## Leitura do banco de dados
 
-setwd("C:/Users/dioni/OneDrive - University of São Paulo/Doutorado em Estatística/2023.2/2 - Aprendizado de Máquina Estatístico/3_Trabalho_Final")
+#setwd("C:/Users/dioni/OneDrive - University of São Paulo/Doutorado em Estatística/2023.2/2 - Aprendizado de Máquina Estatístico/3_Trabalho_Final")
 
-bf = read.csv("bolsafamilia_tx.csv")
+bf = read.csv("https://raw.githubusercontent.com/Dionisioneto/Aprendizado_de_Maquina_Estatistico/main/3_Trabalho_Final/dados/bolsafamilia_tx.csv")
 head(bf)
 
 ## retirar a coluna indice
 bf = bf %>% subset(select=-c(X))
-
 
 ## ---
 ## Separação das covariaveis e da resposta
@@ -82,6 +82,95 @@ msebeta
 sqrt(msebeta)
 
 
+## Validação Cruzada (k-fold cross validation)
+## para a regressão beta
+
+## O elemento de variação é a função de ligação
+
+linksfun = c("logit", "probit", "cloglog", "cauchit", "log", "loglog")
+
+# for (link in linksfun) {
+#   
+#   breg = betareg(tx_benbf ~.,
+#                  data=treinobf,
+#                  link=link)
+#   
+#   ypredbreg = predict(breg,testebf)
+#   
+#   msebeta = MSE(ypred=ypredbreg,ytrue=testebf$tx_benbf)
+#   msebeta
+#   
+# }
+
+set.seed(10)
+kfolds = 10
+
+tcv_data = treinobf %>% 
+  mutate(fold = sample(1:kfolds, size=dim(treinobf)[1], replace=T))
+
+cv_err = rep(0, kfolds)
+matrix_cv = matrix(data=0,nrow=length(linksfun),
+                   ncol = kfolds,
+                   dimnames = list(linksfun))
+
+enableJIT(3)
+for(link in 1:length(linksfun)){
+  for(i in 1:kfolds){
+    t_data = filter(tcv_data, fold!=i)
+    v_data = filter(tcv_data, fold==i)
+    
+    fitbeta = betareg(tx_benbf ~.,
+                   data=t_data,
+                   link = linksfun[link])
+    
+    predsbeta = predict(fitbeta, newdata=v_data)
+    
+    err = v_data$tx_benbf - predsbeta 
+    mse = mean(err^2)
+    
+    # Record the RMSE
+    matrix_cv[link,i] <- sqrt(mse)
+  }
+}
+
+matrix_cv
+
+## as medias da validação cruzada
+
+colMeans(matrix_cv)
+linkmin=which(colMeans(matrix_cv)==min(colMeans(matrix_cv)))
+
+matrix_cv ## ligação log-log é a que retorno o menor RMSE
+
+## ----
+## Iremos treinar o modelo final com o loglog
+## ----
+
+modbeta = betareg(tx_benbf ~.,
+            data=treinobf,
+              link = "loglog")
+
+ypbreg = predict(modbeta,testebf)
+
+msebetareg = mean((testebf$tx_benbf - ypbreg)^2)
+msebetareg ## EQM
+
+## RMSE
+sqrt(msebetareg)
+
+## MAE
+mean(abs(testebf$tx_benbf - ypbreg))
+
+R2 = function(y,ypred){
+  num = sum((y-ypred)^2)
+  dem =  sum((y-mean(y))^2)
+  r = 1 - (num/dem)
+  return(r)
+}
+
+## R2: Coeficiente de Determinação
+R2(y=testebf$tx_benbf,ypred=ypbreg) 
+  
 ## ----
 ## Algoritmo de Estimação Bagging
 ## ----
@@ -90,11 +179,12 @@ sqrt(msebeta)
 ## Algoritmo de Bagging para a Regressão Beta
 ## ----
 
-bagging_betareg = function(xtreino,ytreino,xteste,n_estimadores,n_amostra){
+bagging_betareg = function(xtreino,ytreino,xteste,n_estimadores,n_amostra,linkfun){
   
   ## predicoes do bagging em uma matriz
   matriz_bag = matrix(data=0,nrow=dim(xteste)[1],ncol=n_estimadores)
   
+  enableJIT(3)
   for(preditor in 1:n_estimadores){
     random_id = sample(1:dim(xtreino)[1],replace=T)
     
@@ -106,7 +196,7 @@ bagging_betareg = function(xtreino,ytreino,xteste,n_estimadores,n_amostra){
     
     reg_bag = betareg(y ~ .,
                       data=dados_bag,
-                      link='logit')
+                      link=linkfun)
     
     y_pred_bag = predict(reg_bag, newdata=xteste)
     matriz_bag[,preditor] = y_pred_bag
@@ -120,7 +210,53 @@ y_pred_bagging= bagging_betareg(xtreino=treinobf[, -which(names(treinobf) == "tx
                                 ytreino=treinobf[, "tx_benbf"],
                                 xteste=testebf[, -which(names(testebf) == "tx_benbf")],
                                 n_estimadores=100,
-                                n_amostra=dim(treinobf)[1])
+                                n_amostra=dim(treinobf)[1],
+                                linkfun = "logit")
+
+
+## ---
+## Realizando o processo de Grid Search
+## ---
+
+set.seed(12)
+
+b_values = c(100,200)
+linksfun
+
+kfolds = 10
+
+tcv_bag = treinobf %>% 
+  mutate(fold = sample(1:kfolds, size=dim(treinobf)[1], replace=T))
+
+
+array_cv_bag = array(0, dim = c(length(linksfun), kfolds,length(b_values)))
+
+enableJIT(3)
+for (b in 1:length(b_values)){
+  for(link in 1:length(linksfun)){
+    for(i in 1:kfolds){
+      t_data = filter(tcv_data, fold!=i)
+      v_data = filter(tcv_data, fold==i)
+      
+      predsbetabag = bagging_betareg(xtreino=t_data[, -which(names(t_data) == "tx_benbf")],
+                                   ytreino=t_data[, "tx_benbf"],
+                                   xteste=v_data[, -which(names(v_data) == "tx_benbf")],
+                                   n_estimadores=b_values[b],
+                                   n_amostra=dim(t_data)[1],
+                                   linkfun = linksfun[link])
+      
+      errbag = v_data$tx_benbf - predsbetabag 
+      msebag = mean(errbag^2)
+      
+      # Record the RMSE
+      array_cv_bag[link,i,b] <- sqrt(mse)
+    }
+  }
+}
+
+
+
+
 
 ## Calculando o EQM
 
@@ -129,25 +265,7 @@ msebetabag1
 
 sqrt(msebetabag1)
 
-## Versao do k fold-cross validation para o bagging
 
-# rscvbetabag = function(samplesize,nestimators,folds){
-#   matriz_MSE = matrix(data=0,nrow=dim(xteste)[1],
-#                       ncol=n_estimadores)
-# }
-
-# #Randomly shuffle the data
-# yourdata<-yourdata[sample(nrow(yourdata)),]
-# #Create 10 equally size folds
-# folds <- cut(seq(1,nrow(yourdata)),breaks=10,labels=FALSE)
-# #Perform 10 fold cross validation
-# for(i in 1:10){
-#   #Segement your data by fold using the which() function 
-#   testIndexes <- which(folds==i,arr.ind=TRUE)
-#   testData <- yourdata[testIndexes, ]
-#   trainData <- yourdata[-testIndexes, ]
-#   #Use the test and train data partitions however you desire...
-# }
 
 ## ----
 ## Algoritmo de Estimação Random Forest
@@ -160,6 +278,7 @@ rf_betareg = function(xtreino,ytreino,xteste,
   ## predicoes do Random Forest em uma matriz
   matriz_rf = matrix(data=0,nrow=dim(xteste)[1],ncol=n_estimadores)
   
+  enableJIT(3)
   for(preditor in 1:n_estimadores){
     random_id = sample(1:dim(xtreino)[1],replace=T)
     random_idf = sample(1:dim(xtreino)[2],replace=F)[1:n_features]

@@ -73,10 +73,10 @@ dim(treinobf);dim(testebf)
 #Tune the SVM model
 OptModelsvm=tune(svm, tx_benbf~.,
                  data = treinobf,
-                 ranges=list(epsilon=seq(0,1,0.1),
-                             cost=1:10, kernel=c("linear", "polynomial",
+                 ranges=list(epsilon=seq(0.1,0.5,1),
+                             cost=seq(1,10,2), kernel=c("linear", "polynomial",
                                                   "radial", "sigmoid"),
-                             gamma=log(seq(1,10,0.9))),
+                             gamma=log(seq(1,10,2))),
                  tunecontrol = tune.control(cross = 10))
 
 #Print optimum value of parameters
@@ -91,13 +91,14 @@ plot(OptModelsvm)
 
 #Tune the Random Forest model
 install.packages("randomForest")
+library(randomForest)
 
 OptModelRF=tune(randomForest, tx_benbf~.,
                  data = treinobf,
-                 ranges=list(ntree = seq(100,1000,100),
-                             mtry = seq(5,25,5),
-                             maxnodes = seq(5,25,5)),
-                 tunecontrol = tune.control(cross = 10))
+                 ranges=list(ntree = c(500,1000,2000,3000),
+                             mtry = c(5,10,25),
+                             maxnodes = c(5,10,25)),
+                 tunecontrol = tune.control(cross = 5))
 
 #Print optimum value of parameters
 print(OptModelRF)
