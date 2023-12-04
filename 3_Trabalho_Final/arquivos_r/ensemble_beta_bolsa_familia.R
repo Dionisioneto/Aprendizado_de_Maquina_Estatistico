@@ -8,7 +8,7 @@
 ## Bibliotecas
 
 if(!require(pacman)) install.packages("pacman"); library(pacman)
-p_load(ggplot2,dplyr, betareg, betaboost,e1071,caret,compiler)
+p_load(ggplot2,dplyr, betareg, beepr,betaboost,e1071,caret,compiler,gridExtra)
 
 
 ## Leitura do banco de dados
@@ -62,24 +62,53 @@ testebf = databf[-ind_treino, ]
 
 dim(treinobf);dim(testebf)
 
+
+## -----
+## Métricas de ajuste
+## -----
+
+MSE = function(y,ypred){mean((y - ypred)^2)}
+MAE = function(y,ypred){mean(abs(y - ypred))}
+R2 = function(y,ypred){
+  num = sum((y-ypred)^2)
+  dem =  sum((y-mean(y))^2)
+  r = 1 - (num/dem)
+  return(r)
+}
+
+
+
 ## -------
 ## Modelo de Regressão Beta
 ## -------
 #library(gamlss)
 
+timebreg_inic <- Sys.time()
+
 breg = betareg(tx_benbf ~.,
-                data=treinobf)
+                data=treinobf,
+               link="loglog")
+
+timebreg_end <- Sys.time()
+
+## Tempo de treinamento
+paste("Tempo de treinamento: ", timebreg_end-timebreg_inic)
+
 
 #summary(breg)
 
 ypredbreg = predict(breg,testebf)
 
-MSE = function(ypred,ytrue){sum((ypred - ytrue)^2)/length(ytrue)}
+MAE(y=testebf$tx_benbf,ypred=ypredbreg)
+MSE(y=testebf$tx_benbf,ypred=ypredbreg)
+sqrt(MSE(y=testebf$tx_benbf,ypred=ypredbreg))
+#R2(y=testebf$tx_benbf,ypred=ypredbreg)
 
-msebeta = MSE(ypred=ypredbreg,ytrue=testebf$tx_benbf)
-msebeta
 
-sqrt(msebeta)
+
+
+
+
 
 
 ## Validação Cruzada (k-fold cross validation)
@@ -87,7 +116,7 @@ sqrt(msebeta)
 
 ## O elemento de variação é a função de ligação
 
-linksfun = c("logit", "probit", "cloglog", "cauchit", "log", "loglog")
+#linksfun = c("logit", "probit", "cloglog", "cauchit", "log", "loglog")
 
 # for (link in linksfun) {
 #   
@@ -155,6 +184,11 @@ ypbreg = predict(modbeta,testebf)
 msebetareg = mean((testebf$tx_benbf - ypbreg)^2)
 msebetareg ## EQM
 
+
+MSE = function(y,ypred){mean((y - ypred)^2)}
+MAE = function(y,ypred){mean(abs(y - ypred))}
+
+
 ## RMSE
 sqrt(msebetareg)
 
@@ -206,65 +240,127 @@ bagging_betareg = function(xtreino,ytreino,xteste,n_estimadores,n_amostra,linkfu
   return(predicoes_bag)
 }
 
+timebag_inic <- Sys.time()
+
 y_pred_bagging= bagging_betareg(xtreino=treinobf[, -which(names(treinobf) == "tx_benbf")],
                                 ytreino=treinobf[, "tx_benbf"],
                                 xteste=testebf[, -which(names(testebf) == "tx_benbf")],
-                                n_estimadores=100,
+                                n_estimadores=360,
+                                n_amostra=dim(treinobf)[1],
+                                linkfun = "loglog")
+
+# Marcar o final do tempo
+timebag_fim <- Sys.time()
+
+paste("Tempo de treinamento: ", timebag_fim-timebag_inic)
+
+MAE(y=testebf$tx_benbf,ypred=y_pred_bagging)
+MSE(y=testebf$tx_benbf,ypred=y_pred_bagging)
+sqrt(MSE(y=testebf$tx_benbf,ypred=y_pred_bagging))
+
+
+## grid search beta reg
+
+n_estimators = seq(10,800,by=10)
+
+matrix_cv_bag = matrix(data=0,nrow=length(n_estimators),ncol=1)
+
+for(i in 1:length(n_estimators)){
+    y_pred_bag = bagging_betareg(xtreino=treinobf[, -which(names(treinobf) == "tx_benbf")],
+                                ytreino=treinobf[, "tx_benbf"],
+                                xteste=testebf[, -which(names(testebf) == "tx_benbf")],
+                                n_estimadores=n_estimators[i],
                                 n_amostra=dim(treinobf)[1],
                                 linkfun = "logit")
+    
+    matrix_cv_bag[i,1] = MSE(y=testebf$tx_benbf,ypred=y_pred_bag)
+    print(paste("estimators: ", n_estimators[i]))
+  
+}
+
+
+#plot(matrix_cv_bag,type='b')
+cv_bag = as.data.frame(matrix_cv_bag)
+cv_bag$ests = n_estimators 
+colnames(cv_bag)[1] = "EQM"
+
+ggplot(data=cv_bag, aes(x=n_estimators, y=EQM, group=1)) +
+  geom_line(linetype = "dashed")+
+  geom_point(color='royalblue4',size=2) + 
+  xlab("\n Number of estimators") +
+  ylab("MSE \n")+
+  theme_minimal()
 
 
 ## ---
 ## Realizando o processo de Grid Search
 ## ---
+# 
+# set.seed(12)
+# 
+# b_values = c(200,500,1000)
+# linksfun
+# 
+# kfolds = 10
+# 
+# tcv_bag = treinobf %>% 
+#   mutate(fold = sample(1:kfolds, size=dim(treinobf)[1], replace=T))
+# 
+# 
+# matrix_cv_bag = matrix(0,nrow=length(b_values),ncol=kfolds,
+#                        dimnames = list(b_values))
+# 
+# 
+# timebag_inic <- Sys.time()
+# 
+# enableJIT(3)
+# for (b in 1:length(b_values)){
+#     for(i in 1:kfolds){
+#       t_data = filter(tcv_data, fold!=i)
+#       v_data = filter(tcv_data, fold==i)
+#       
+#       predsbetabag = bagging_betareg(xtreino=t_data[, -which(names(t_data) == "tx_benbf")],
+#                                    ytreino=t_data[, "tx_benbf"],
+#                                    xteste=v_data[, -which(names(v_data) == "tx_benbf")],
+#                                    n_estimadores=b_values[b],
+#                                    n_amostra=dim(t_data)[1],
+#                                    linkfun = "loglog")
+#       
+#       errbag = v_data$tx_benbf - predsbetabag 
+#       msebag = mean(errbag^2)
+#       
+#       # Record the RMSE
+#       matrix_cv_bag[b,i] <- sqrt(mse)
+#     }
+# }
 
-set.seed(12)
 
-b_values = c(100,200)
-linksfun
-
-kfolds = 10
-
-tcv_bag = treinobf %>% 
-  mutate(fold = sample(1:kfolds, size=dim(treinobf)[1], replace=T))
+# Marcar o final do tempo
+#timebag_fim <- Sys.time()
 
 
-array_cv_bag = array(0, dim = c(length(linksfun), kfolds,length(b_values)))
+## MSE
+MSE(y=testebf$tx_benbf,ypred=y_pred_bagging)
 
-enableJIT(3)
-for (b in 1:length(b_values)){
-  for(link in 1:length(linksfun)){
-    for(i in 1:kfolds){
-      t_data = filter(tcv_data, fold!=i)
-      v_data = filter(tcv_data, fold==i)
-      
-      predsbetabag = bagging_betareg(xtreino=t_data[, -which(names(t_data) == "tx_benbf")],
-                                   ytreino=t_data[, "tx_benbf"],
-                                   xteste=v_data[, -which(names(v_data) == "tx_benbf")],
-                                   n_estimadores=b_values[b],
-                                   n_amostra=dim(t_data)[1],
-                                   linkfun = linksfun[link])
-      
-      errbag = v_data$tx_benbf - predsbetabag 
-      msebag = mean(errbag^2)
-      
-      # Record the RMSE
-      array_cv_bag[link,i,b] <- sqrt(mse)
-    }
-  }
-}
+## RMSE
+sqrt(MSE(y=testebf$tx_benbf,ypred=y_pred_bagging))
+
+## MAE
+MAE(y=testebf$tx_benbf,ypred=y_pred_bagging)
+
+
+## R2: Coeficiente de Determinação
+R2(y=testebf$tx_benbf,ypred=y_pred_bagging) 
 
 
 
-
-
-## Calculando o EQM
-
-msebetabag1 = MSE(ypred=y_pred_bagging,ytrue=testebf$tx_benbf)
-msebetabag1
-
-sqrt(msebetabag1)
-
+# ## Calculando o EQM
+# 
+# msebetabag1 = MSE(ypred=y_pred_bagging,ytrue=testebf$tx_benbf)
+# 
+# msebetabag1
+# 
+# sqrt(msebetabag1)
 
 
 ## ----
@@ -301,20 +397,95 @@ rf_betareg = function(xtreino,ytreino,xteste,
   return(predicoes_rf)
 }
 
+timerfbeta_inic = Sys.time()
+
 
 y_pred_rf1 = rf_betareg(xtreino=treinobf[, -which(names(treinobf) == "tx_benbf")],
                         ytreino=treinobf[, "tx_benbf"],
                         xteste=testebf[, -which(names(testebf) == "tx_benbf")],
-                        n_estimadores=100,
+                        n_estimadores=410,
                         n_amostra=dim(treinobf)[1],
                         n_features=10)
 
+timerfbeta_fim = Sys.time()
 
-msebetarf1 = MSE(ypred=y_pred_rf,ytrue=testebf$tx_benbf)
-msebetarf1
 
-sqrt(msebetarf1)
+paste("Tempo de treinamento: ", (timerfbeta_fim-timerfbeta_inic)*60)
 
+## MAE
+MAE(y=testebf$tx_benbf,ypred=y_pred_rf1)
+
+## MSE
+MSE(y=testebf$tx_benbf,ypred=y_pred_rf1)
+
+## RMSE
+sqrt(MSE(y=testebf$tx_benbf,ypred=y_pred_rf1))
+
+
+## R2: Coeficiente de Determinação
+R2(y=testebf$tx_benbf,ypred=y_pred_rf1) 
+
+
+n_estimators = seq(50,500,by=50)
+n_features = c(5,10,15,25)
+
+matrix_cv_RF = matrix(data=0,nrow=length(n_estimators),ncol=length(n_features))
+
+for(i in 1:length(n_estimators)){
+  for(j in 1:length(n_features)){
+    y_pred_rf = rf_betareg(xtreino=treinobf[, -which(names(treinobf) == "tx_benbf")],
+                            ytreino=treinobf[, "tx_benbf"],
+                            xteste=testebf[, -which(names(testebf) == "tx_benbf")],
+                            n_estimadores=n_estimators[i],
+                            n_amostra=dim(treinobf)[1],
+                            n_features=n_features[j])
+    
+    matrix_cv_RF[i,j] = MSE(y=testebf$tx_benbf,ypred=y_pred_rf)
+    print(paste("par: (",n_estimators[i],",",n_features[j],")"))
+  }
+}
+
+cv_RF = as.data.frame(matrix_cv_RF)
+colnames(cv_RF) = c("f5","f10","f15","f25")
+cv_RF$estimators = seq(50,500,by=50)
+
+gf5 = ggplot(data=cv_RF, aes(x=estimators, y=f5, group=1)) +
+  geom_line(linetype = "dashed")+
+  geom_point(color='royalblue4',size=2.5) + 
+  xlab("\n Number of estimators") +
+  ylab("MSE \n")+
+  labs(title="k = 5") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+gf10 = ggplot(data=cv_RF, aes(x=estimators, y=f10, group=1)) +
+  geom_line(linetype = "dashed")+
+  geom_point(color='royalblue4',size=2.5) + 
+  xlab("\n Number of estimators") +
+  ylab("MSE \n")+
+  labs(title="k = 10") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+gf15 = ggplot(data=cv_RF, aes(x=estimators, y=f15, group=1)) +
+  geom_line(linetype = "dashed")+
+  geom_point(color='royalblue4',size=2.5) + 
+  xlab("\n Number of estimators") +
+  ylab("MSE \n")+
+  labs(title="k = 15") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+gf25 = ggplot(data=cv_RF, aes(x=estimators, y=f25, group=1)) +
+  geom_line(linetype = "dashed")+
+  geom_point(color='royalblue4',size=2.5) + 
+  xlab("\n Number of estimators") +
+  ylab("MSE \n")+
+  labs(title="k = 25") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+grid.arrange(gf5,gf10,gf15,gf25,ncol=2)
 
 ## ----
 ## Algoritmo de Boosing para a Regressão Beta
@@ -329,31 +500,226 @@ library("devtools")
 #install_github("boost-R/betaboost")
 library("betaboost")
 
+timeboost_inic <- Sys.time()
 
 betaboosting = betaboost(tx_benbf ~.,
                 data=treinobf)
 
-summary(betaboosting)
+timeboost_fim <- Sys.time()
+
+timeboost_fim-timeboost_inic
+
+#summary(betaboosting)
 
 y_predbetaboost1 = predict(betaboosting,testebf)
 
-msebetaboost1 = MSE(ypred=y_predbetaboost1,ytrue=testebf$tx_benbf)
-msebetaboost1
 
-sqrt(msebetaboost1)
+MSE(y=testebf$tx_benbf,ypred=y_predbetaboost1)
+sqrt(MSE(y=testebf$tx_benbf,ypred=y_predbetaboost1))
+
+MAE(y=testebf$tx_benbf,ypred=y_predbetaboost1)
+
+R2(y=testebf$tx_benbf,ypred=y_predbetaboost1)
+
 
 
 ## ---
-## Implementação do algoritmo de Adaboosting
+## Implementação do algoritmo de Gradient Boosting
+## Para a Regressão Beta
 ## ---
 
+## Passo 0: Predição inicial para F0
+## F0 é a média das observações
+
+f0 = rep(0,length(testebf$tx_benbf))
+f = f0
+#r = treinobf$tx_benbf
+
+G = 20 ## número de preditores para o modelo
+alpha = 0.25 ## learning rate do modelo
+
+## dados para  o boosting
+treinobfboost = treinobf
 
 
+# matriz de armazenamento das predições
+mboost = matrix(data=0,nrow=nrow(testebf),ncol=G)
+
+timeboost_inic <- Sys.time()
+
+resemp = treinobf$tx_benbf
+
+enableJIT(3)
+for (g in 1:G){
+  
+  resemp01 = (resemp-min(resemp))/(max(resemp)-min(resemp))
+  resemp01[resemp01>0.99999] = 0.9999
+  resemp01[resemp01<0.0001] = 0.0001
+  
+  treinobfboost$resemp01 = resemp01
+  
+  mdres = betareg(resemp01 ~ .-tx_benbf,
+                 data=treinobfboost,
+                 link="loglog")
+  
+  respred = predict(mdres,newdata=testebf)
+  reshat = respred*(max(respred) - min(respred)) + min(respred)
+  
+  f = f + (alpha*reshat)
+  resemp = resemp - (alpha*reshat)
+  
+  ## salvar a predição f
+  mboost[,g] = reshat*alpha
+  
+  print(g)
+
+}
+
+timeboost_end <- Sys.time()
+
+beep(sound = 2, expr = NULL)
 
 
+## Predições para a variável resposta
+
+predunscaled = rowSums(mboost)
+
+## Precisamos padronizar os valores para [0,1].
+
+predscaled = (predunscaled-min(predunscaled))/(max(predunscaled)-min(predunscaled))
+
+hist(predscaled)
 
 
+## MSE e RMSE
+MSE(y=testebf$tx_benbf,ypred=predscaled)
+sqrt(MSE(y=testebf$tx_benbf,ypred=predscaled))
+
+## MAE
+MAE(y=testebf$tx_benbf,ypred=predscaled)
+
+## R2
+R2(y=testebf$tx_benbf,ypred=predscaled)
+
+## tempo
+timeboost_end - timeboost_inic 
 
 
+## estudo dos vaores de estimadores e dos alphas
 
+GS = seq(50,500,50)
+alphas = c(0.25,0.50,0.75,0.95)
+
+matrix_cv_boost = matrix(0,nrow = length(GS), ncol = length(alphas))
+
+enableJIT(3)
+for (i in 1:length(GS)){
+  for (j in 1:length(alphas)){
+    ## Passo 0: Predição inicial para F0
+    ## F0 é a média das observações
+    
+    f0 = rep(0,length(testebf$tx_benbf))
+    f = f0
+    #r = treinobf$tx_benbf
+    
+    G = GS[i] ## número de preditores para o modelo
+    alpha = alphas[j] ## learning rate do modelo
+    
+    # matriz de armazenamento das predições
+    mboost = matrix(data=0,nrow=nrow(testebf),ncol=G)
+
+    
+    resemp = treinobf$tx_benbf
+    
+    enableJIT(3)
+    for (g in 1:G){
+      
+      resemp01 = (resemp-min(resemp))/(max(resemp)-min(resemp))
+      resemp01[resemp01>0.99999] = 0.9999
+      resemp01[resemp01<0.0001] = 0.0001
+      
+      
+      treinobfboost$resemp01 = resemp01
+      
+      mdres = betareg(resemp01 ~ .-tx_benbf,
+                      data=treinobfboost,
+                      link="loglog")
+      
+      respred = predict(mdres,newdata=testebf)
+      reshat = respred*(max(respred) - min(respred)) + min(respred)
+      
+      f = f + (alpha*reshat)
+      resemp = resemp - (alpha*reshat)
+      
+      ## salvar a predição f
+      mboost[,g] = reshat*alpha
+      
+    }
+    
+    ## Predições para a variável resposta
+    
+    predunscaled = rowSums(mboost)
+    
+    ## Precisamos padronizar os valores para [0,1].
+    
+    predscaled = (predunscaled-min(predunscaled))/(max(predunscaled)-min(predunscaled))
+
+    ## MSE 
+    matrix_cv_boost[i,j] = MSE(y=testebf$tx_benbf,ypred=predscaled)
+    
+    print(paste("par: (",i,",",j,")"))
+  }
+}
+
+matrix_cv_boost
+dim(matrix_cv_boost)
+
+matrix_cv_boost[,1]
+
+plot(1:10,matrix_cv_boost[,1],type="b")
+plot(1:10,matrix_cv_boost[,2],type="b")
+plot(1:10,matrix_cv_boost[,3],type="b")
+plot(1:10,matrix_cv_boost[,4],type="b")
+
+cv_boost = as.data.frame(matrix_cv_boost)
+colnames(cv_boost ) = c("a25","a50","a75","a95")
+cv_boost$estimators = seq(50,500,50)
+
+ga25 = ggplot(data=cv_boost, aes(x=estimators, y=a25, group=1)) +
+  geom_line(linetype = "dashed")+
+  geom_point(color='royalblue4',size=2.5) + 
+  xlab("\n Number of estimators") +
+  ylab("MSE \n")+
+  labs(title=expression(alpha==0.25)) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ga50 = ggplot(data=cv_boost, aes(x=estimators, y=a50, group=1)) +
+  geom_line(linetype = "dashed")+
+  geom_point(color='royalblue4',size=2.5) + 
+  xlab("\n Number of estimators") +
+  ylab("MSE \n")+
+  labs(title=expression(alpha==0.50)) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ga75 = ggplot(data=cv_boost, aes(x=estimators, y=a75, group=1)) +
+  geom_line(linetype = "dashed")+
+  geom_point(color='royalblue4',size=2.5) + 
+  xlab("\n Number of estimators") +
+  ylab("MSE \n")+
+  labs(title=expression(alpha==0.75))+
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+ga95 = ggplot(data=cv_boost, aes(x=estimators, y=a95, group=1)) +
+  geom_line(linetype = "dashed")+
+  geom_point(color='royalblue4',size=2.5) + 
+  xlab("\n Number of estimators") +
+  ylab("MSE \n")+
+  labs(title=expression(alpha==0.95)) +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5))
+
+grid.arrange(ga25,ga50,ga75,ga95,ncol=2)
 
